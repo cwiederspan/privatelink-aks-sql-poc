@@ -25,7 +25,9 @@ az network vnet subnet create \
 --address-prefixes 10.10.2.0/24 \
 -n data-subnet \
 -g $NAME \
---vnet-name $NAME
+--vnet-name $NAME \
+--disable-private-endpoint-network-policies true
+
 
 # Create a user-assignable identity
 az identity create --name $NAME-sp --resource-group $NAME
@@ -36,6 +38,8 @@ export USER_IDENTITY=/subscriptions/b9c770d1-cde9-4da3-ae40-95ce1a4fac0c/resourc
 export CLUSTER_SUBNET_ID=/subscriptions/b9c770d1-cde9-4da3-ae40-95ce1a4fac0c/resourceGroups/cdw-kubernetes-20210309/providers/Microsoft.Network/virtualNetworks/cdw-kubernetes-20210309/subnets/cluster-subnet
 export DATA_SUBNET_ID=/subscriptions/b9c770d1-cde9-4da3-ae40-95ce1a4fac0c/resourceGroups/cdw-kubernetes-20210309/providers/Microsoft.Network/virtualNetworks/cdw-kubernetes-20210309/subnets/data-subnet
 
+
+# Create the AKS Cluster
 az aks create \
 --resource-group $NAME \
 --name $NAME \
@@ -49,9 +53,6 @@ az aks create \
 --assign-identity $USER_IDENTITY
 
 
---service-cidr 10.100.0.0/16 \
---dns-service-ip 10.100.0.10 \
-
 # Create the SQL Server
 az sql server create \
 -l $LOCATION \
@@ -63,6 +64,7 @@ az sql server create \
 
 export SQL_ID=/subscriptions/b9c770d1-cde9-4da3-ae40-95ce1a4fac0c/resourceGroups/cdw-kubernetes-20210309/providers/Microsoft.Sql/servers/cdw-kubernetes-20210309-svr
 
+
 # Create the SQL Database
 az sql db create \
 -n $NAME-db \
@@ -73,17 +75,19 @@ az sql db create \
 -e GeneralPurpose \
 -f Gen5 \
 -c 2 \
---auto-pause-delay 120
+--auto-pause-delay 60
+
 
 # Create the Private Endpoint
 az network private-endpoint create \
 -g $NAME \
 -n $NAME-pe \
 -l $LOCATION \
---group-id sqlServer \
 --subnet $DATA_SUBNET_ID \
+--group-id sqlServer \
 --private-connection-resource-id $SQL_ID \
---connection-name sql-connection 
+--connection-name sql-connection \
+--manual-request false
 
 
 # Create the Private DNS Zone
@@ -106,6 +110,9 @@ az network private-endpoint dns-zone-group create \
 --zone-name zone-group
 
 
+# Connect and Test the SQL Connection
+
+az aks get-credentials -n $NAME -g $NAME --overwrite
 
 kubectl run sql-cli --image=mcr.microsoft.com/mssql-tools -i --tty --rm
 
@@ -113,8 +120,5 @@ sqlcmd -S cdw-kubernetes-20210309-svr.database.windows.net -d cdw-kubernetes-202
 
 SELECT CustomerID, CompanyName FROM SalesLT.Customer WHERE CustomerID < 100
 GO
-
-
-
 
 ```
